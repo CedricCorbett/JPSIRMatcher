@@ -1,0 +1,306 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import {
+  ArrowLeft, Copy, ExternalLink, CheckCircle, AlertTriangle,
+  Loader2, Search
+} from 'lucide-react'
+import { supabase } from '../lib/supabase.ts'
+import type { Physician, Match } from '../lib/types.ts'
+import PhysicianCard from '../components/PhysicianCard.tsx'
+import MatchCard from '../components/MatchCard.tsx'
+import ScoreGauge from '../components/ScoreGauge.tsx'
+import { CardSkeleton } from '../components/LoadingSkeleton.tsx'
+import { useToast } from '../components/Toast.tsx'
+
+export default function MatchResults() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { addToast } = useToast()
+
+  const [physician, setPhysician] = useState<Physician | null>(null)
+  const [matches, setMatches] = useState<Match[]>([])
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const fetchData = useCallback(async () => {
+    if (!id) return
+
+    const { data: phys } = await supabase
+      .from('physicians')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (phys) setPhysician(phys as Physician)
+
+    if (phys?.status === 'complete') {
+      const { data: matchData } = await supabase
+        .from('matches')
+        .select('*, job_listing:job_listings(*)')
+        .eq('physician_id', id)
+        .order('rank', { ascending: true })
+
+      const m = (matchData || []) as Match[]
+      setMatches(m)
+      if (m.length > 0 && !selectedMatch) {
+        setSelectedMatch(m[0])
+      }
+    }
+
+    setLoading(false)
+  }, [id])
+
+  // Initial fetch
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // Realtime subscription for physician status changes
+  useEffect(() => {
+    if (!id) return
+
+    const channel = supabase
+      .channel(`physician-${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'physicians',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          const updated = payload.new as Physician
+          setPhysician(updated)
+          if (updated.status === 'complete') {
+            fetchData()
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [id, fetchData])
+
+  // Polling fallback while processing
+  useEffect(() => {
+    if (!physician || (physician.status !== 'pending' && physician.status !== 'processing')) return
+
+    const interval = setInterval(fetchData, 5000)
+    return () => clearInterval(interval)
+  }, [physician?.status, fetchData])
+
+  function copyEmail(text: string) {
+    navigator.clipboard.writeText(text)
+    addToast('Email summary copied to clipboard', 'success')
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6 pb-20 md:pb-0">
+        <CardSkeleton />
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <CardSkeleton />
+            <CardSkeleton />
+          </div>
+          <div className="lg:col-span-3">
+            <CardSkeleton />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!physician) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-text-muted">Physician not found.</p>
+        <button onClick={() => navigate('/')} className="text-gold text-sm mt-4 hover:underline">
+          Back to Dashboard
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 pb-20 md:pb-0">
+      {/* Back Button */}
+      <button
+        onClick={() => navigate('/')}
+        className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to Dashboard
+      </button>
+
+      {/* Physician Card */}
+      <PhysicianCard physician={physician} />
+
+      {/* Status Bar */}
+      <StatusBar physician={physician} matchCount={matches.length} />
+
+      {/* Match Results */}
+      {physician.status === 'complete' && matches.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Left: Match cards */}
+          <div className="lg:col-span-2 space-y-3 lg:max-h-[calc(100vh-400px)] lg:overflow-y-auto lg:pr-2">
+            {matches.map((match, idx) => (
+              <div key={match.id} className="animate-fade-in" style={{ animationDelay: `${idx * 80}ms` }}>
+                <MatchCard
+                  match={match}
+                  selected={selectedMatch?.id === match.id}
+                  onClick={() => setSelectedMatch(match)}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Right: Detail panel */}
+          <div className="lg:col-span-3">
+            {selectedMatch && <MatchDetail match={selectedMatch} onCopyEmail={copyEmail} />}
+          </div>
+        </div>
+      )}
+
+      {physician.status === 'complete' && matches.length === 0 && (
+        <div className="rounded-xl border border-border bg-bg-card p-12 text-center">
+          <Search className="w-10 h-10 text-text-muted mx-auto mb-3" />
+          <p className="text-text-secondary">No matches found.</p>
+          <p className="text-text-muted text-sm mt-1">
+            {physician.error_message || 'Try adding more sites to your registry or adjusting the physician profile.'}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatusBar({ physician, matchCount }: { physician: Physician; matchCount: number }) {
+  if (physician.status === 'pending') {
+    return (
+      <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-amber/5 border border-amber/20">
+        <Loader2 className="w-4 h-4 text-amber animate-spin" />
+        <span className="text-sm text-amber">Queued for processing...</span>
+      </div>
+    )
+  }
+
+  if (physician.status === 'processing') {
+    return (
+      <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-blue/5 border border-blue/20">
+        <Loader2 className="w-4 h-4 text-blue animate-spin" />
+        <span className="text-sm text-blue">Firecrawl searching your registered sites...</span>
+      </div>
+    )
+  }
+
+  if (physician.status === 'error') {
+    return (
+      <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-red/5 border border-red/20">
+        <AlertTriangle className="w-4 h-4 text-red" />
+        <span className="text-sm text-red">{physician.error_message || 'An error occurred during processing.'}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-green/5 border border-green/20">
+      <CheckCircle className="w-4 h-4 text-green" />
+      <span className="text-sm text-green">
+        Results Ready — {matchCount} match{matchCount !== 1 ? 'es' : ''} found
+      </span>
+    </div>
+  )
+}
+
+function MatchDetail({ match, onCopyEmail }: { match: Match; onCopyEmail: (text: string) => void }) {
+  const job = match.job_listing
+
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-6 space-y-6 animate-slide-in sticky top-0">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="font-display text-xl font-bold text-text-primary">
+            {job?.job_title || 'Untitled Position'}
+          </h3>
+          <p className="text-sm text-text-secondary mt-1">
+            {job?.organization} &middot; {job?.location}
+          </p>
+        </div>
+        <ScoreGauge score={match.match_score} size={72} />
+      </div>
+
+      {/* Reasoning */}
+      <div>
+        <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">Match Reasoning</h4>
+        <p className="text-sm text-text-secondary leading-relaxed">{match.match_reasoning}</p>
+      </div>
+
+      {/* Strengths */}
+      {match.strengths && match.strengths.length > 0 && (
+        <div>
+          <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">Strengths</h4>
+          <ul className="space-y-2">
+            {match.strengths.map((s, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-text-secondary">
+                <CheckCircle className="w-4 h-4 text-green shrink-0 mt-0.5" />
+                {s}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Gaps */}
+      {match.gaps && match.gaps.length > 0 && (
+        <div>
+          <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">Gaps / Concerns</h4>
+          <ul className="space-y-2">
+            {match.gaps.map((g, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-text-secondary">
+                <AlertTriangle className="w-4 h-4 text-amber shrink-0 mt-0.5" />
+                {g}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Email Summary */}
+      {match.email_summary && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider">Email Summary</h4>
+            <button
+              onClick={() => onCopyEmail(match.email_summary!)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gold hover:bg-gold/10 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Copy
+            </button>
+          </div>
+          <div className="p-4 rounded-lg bg-bg-primary border border-border">
+            <p className="text-sm text-text-secondary leading-relaxed">{match.email_summary}</p>
+          </div>
+        </div>
+      )}
+
+      {/* External Link */}
+      {job?.job_url && (
+        <a
+          href={job.job_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors"
+        >
+          <ExternalLink className="w-4 h-4" />
+          View Original Posting
+        </a>
+      )}
+    </div>
+  )
+}
