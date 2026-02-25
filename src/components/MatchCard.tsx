@@ -11,6 +11,9 @@ interface MatchCardProps {
 
 export default function MatchCard({ match, selected, onClick }: MatchCardProps) {
   const job = match.job_listing
+  const jobTitle = job?.job_title || 'Untitled Position'
+  const org = job?.organization || 'Unknown'
+  const location = job?.location || 'Unknown'
 
   return (
     <div
@@ -19,7 +22,7 @@ export default function MatchCard({ match, selected, onClick }: MatchCardProps) 
         'relative rounded-xl border p-4 cursor-pointer transition-all duration-200',
         'hover:bg-bg-card-hover',
         selected
-          ? 'border-gold bg-bg-card-hover shadow-lg shadow-gold/5'
+          ? 'border-gold bg-gold/5 ring-1 ring-gold/30 shadow-lg shadow-gold/5'
           : 'border-border bg-bg-card',
         match.rank === 1 && 'border-t-2 border-t-gold'
       )}
@@ -37,17 +40,17 @@ export default function MatchCard({ match, selected, onClick }: MatchCardProps) 
         </div>
 
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-text-primary truncate">
-            {job?.job_title || 'Untitled Position'}
+          <h4 className="text-sm font-semibold text-text-primary truncate" title={jobTitle}>
+            {jobTitle}
           </h4>
           <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
-            <span className="flex items-center gap-1 truncate">
+            <span className="flex items-center gap-1 truncate" title={org}>
               <Building2 className="w-3 h-3 shrink-0" />
-              {job?.organization || 'Unknown'}
+              {org}
             </span>
-            <span className="flex items-center gap-1 truncate">
+            <span className="flex items-center gap-1 truncate" title={location}>
               <MapPin className="w-3 h-3 shrink-0" />
-              {job?.location || 'Unknown'}
+              {location}
             </span>
           </div>
         </div>
@@ -57,12 +60,12 @@ export default function MatchCard({ match, selected, onClick }: MatchCardProps) 
 
       <div className="flex flex-wrap gap-1.5 mt-3">
         {match.strengths?.slice(0, 2).map((s, i) => (
-          <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-green/10 text-green truncate max-w-[140px]">
+          <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-green/10 text-green truncate max-w-[140px]" title={s}>
             {s}
           </span>
         ))}
         {match.gaps?.slice(0, 1).map((g, i) => (
-          <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber/10 text-amber truncate max-w-[140px]">
+          <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber/10 text-amber truncate max-w-[140px]" title={g}>
             {g}
           </span>
         ))}

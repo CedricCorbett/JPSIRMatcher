@@ -4,6 +4,8 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase.ts'
 import { useAuth } from '../App.tsx'
 import { useToast } from '../components/Toast.tsx'
+import ConfirmDialog from '../components/ConfirmDialog.tsx'
+import { TableRowSkeleton } from '../components/LoadingSkeleton.tsx'
 import type { RecruiterSite } from '../lib/types.ts'
 
 export default function MySites() {
@@ -15,20 +17,25 @@ export default function MySites() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ site_name: '', base_url: '', notes: '' })
   const [submitting, setSubmitting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => {
     fetchSites()
   }, [])
 
   async function fetchSites() {
-    const { data } = await supabase
-      .from('recruiter_sites')
-      .select('*')
-      .order('created_at', { ascending: false })
+    try {
+      const { data } = await supabase
+        .from('recruiter_sites')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-    const all = (data || []) as RecruiterSite[]
-    setSites(all.filter((s) => !s.is_global && s.recruiter_id === session?.user?.id))
-    setGlobalSites(all.filter((s) => s.is_global))
+      const all = (data || []) as RecruiterSite[]
+      setSites(all.filter((s) => !s.is_global && s.recruiter_id === session?.user?.id))
+      setGlobalSites(all.filter((s) => s.is_global))
+    } catch {
+      addToast('Failed to load sites', 'error')
+    }
     setLoading(false)
   }
 
@@ -72,11 +79,13 @@ export default function MySites() {
     }
   }
 
-  async function deleteSite(id: string) {
+  async function confirmDelete() {
+    if (!deleteTarget) return
+
     const { error } = await supabase
       .from('recruiter_sites')
       .delete()
-      .eq('id', id)
+      .eq('id', deleteTarget)
 
     if (error) {
       addToast(error.message, 'error')
@@ -84,6 +93,8 @@ export default function MySites() {
       addToast('Site removed', 'info')
       fetchSites()
     }
+
+    setDeleteTarget(null)
   }
 
   const inputClass =
@@ -94,7 +105,7 @@ export default function MySites() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-text-primary">My Sites</h1>
-          <p className="text-sm text-text-secondary mt-1">Manage your job site registry for Firecrawl searches</p>
+          <p className="text-sm text-text-secondary mt-1">Manage your job site registry for searches</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -186,11 +197,11 @@ export default function MySites() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={4} className="px-5 py-8 text-center text-text-muted">Loading...</td></tr>
+                Array.from({ length: 3 }).map((_, i) => <TableRowSkeleton key={i} />)
               ) : sites.length === 0 ? (
                 <tr><td colSpan={4} className="px-5 py-8 text-center text-text-muted">No custom sites yet. Add one above.</td></tr>
               ) : sites.map((site) => (
-                <SiteRow key={site.id} site={site} onToggle={toggleActive} onDelete={deleteSite} canDelete />
+                <SiteRow key={site.id} site={site} onToggle={toggleActive} onDelete={(id) => setDeleteTarget(id)} canDelete />
               ))}
             </tbody>
           </table>
@@ -224,6 +235,16 @@ export default function MySites() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete Site"
+        message="Are you sure you want to remove this site? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
@@ -276,6 +297,7 @@ function SiteRow({
           <button
             onClick={() => onDelete(site.id)}
             className="p-1.5 rounded-lg text-text-muted hover:text-red hover:bg-red/10 transition-colors"
+            aria-label={`Delete ${site.site_name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>

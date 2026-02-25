@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, useCallback } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase.ts'
 import type { Profile } from './lib/types.ts'
@@ -10,6 +11,8 @@ import NewPhysician from './pages/NewPhysician.tsx'
 import MatchResults from './pages/MatchResults.tsx'
 import MySites from './pages/MySites.tsx'
 import AdminPanel from './pages/AdminPanel.tsx'
+import NotFound from './pages/NotFound.tsx'
+import ErrorBoundary from './components/ErrorBoundary.tsx'
 import Toast, { ToastProvider } from './components/Toast.tsx'
 
 interface AuthContextType {
@@ -36,7 +39,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary">
-        <div className="text-text-secondary">Loading...</div>
+        <div className="flex items-center gap-3 text-text-secondary">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span className="text-sm">Loading...</span>
+        </div>
       </div>
     )
   }
@@ -54,7 +60,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary">
-        <div className="text-text-secondary">Loading...</div>
+        <div className="flex items-center gap-3 text-text-secondary">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span className="text-sm">Loading...</span>
+        </div>
       </div>
     )
   }
@@ -127,7 +136,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   )
 }
@@ -179,7 +188,9 @@ export default function App() {
   return (
     <AuthContext.Provider value={{ session, profile, loading, signOut }}>
       <ToastProvider>
-        <AppRoutes />
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
         <Toast />
       </ToastProvider>
     </AuthContext.Provider>

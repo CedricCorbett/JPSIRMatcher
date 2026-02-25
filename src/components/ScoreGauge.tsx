@@ -19,7 +19,11 @@ export default function ScoreGauge({ score, size = 64 }: ScoreGaugeProps) {
   }
 
   return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+    <div
+      className="relative inline-flex items-center justify-center"
+      style={{ width: size, height: size }}
+      title="75+: Strong match · 50–74: Moderate match · Below 50: Weak match"
+    >
       <svg width={size} height={size} className="-rotate-90">
         <circle
           cx={center}

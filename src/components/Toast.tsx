@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => [...prev, { id, message, type }])
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 4000)
+    }, 5000)
   }, [])
 
   return (
@@ -47,15 +47,21 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss:
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
+    <div className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 flex flex-col gap-3" role="region" aria-label="Notifications">
       {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={() => onDismiss(toast.id)} />
+        <ToastItemComponent key={toast.id} toast={toast} onDismiss={() => onDismiss(toast.id)} />
       ))}
     </div>
   )
 }
 
-function ToastItem({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
+const typeLabels: Record<ToastType, string> = {
+  success: 'Success',
+  error: 'Error',
+  info: 'Info',
+}
+
+function ToastItemComponent({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
   const icons = {
     success: <CheckCircle className="w-5 h-5 text-green" />,
     error: <AlertCircle className="w-5 h-5 text-red" />,
@@ -64,14 +70,21 @@ function ToastItem({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => vo
 
   return (
     <div
+      role="alert"
+      aria-live="polite"
       className={clsx(
         'flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg animate-slide-in min-w-[320px] max-w-[420px]',
         'bg-bg-card border-border'
       )}
     >
       {icons[toast.type]}
+      <span className="sr-only">{typeLabels[toast.type]}:</span>
       <span className="flex-1 text-sm text-text-primary">{toast.message}</span>
-      <button onClick={onDismiss} className="text-text-muted hover:text-text-secondary transition-colors">
+      <button
+        onClick={onDismiss}
+        className="text-text-muted hover:text-text-secondary transition-colors"
+        aria-label="Dismiss notification"
+      >
         <X className="w-4 h-4" />
       </button>
     </div>

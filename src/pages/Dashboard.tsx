@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, Globe, Plus, ArrowRight } from 'lucide-react'
+import { Users, Clock, CheckCircle, Globe, Plus, ArrowRight, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabase.ts'
 import type { Physician } from '../lib/types.ts'
 import StatusBadge from '../components/StatusBadge.tsx'
 import { StatSkeleton, TableRowSkeleton } from '../components/LoadingSkeleton.tsx'
+import { useToast } from '../components/Toast.tsx'
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { addToast } = useToast()
   const [physicians, setPhysicians] = useState<Physician[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [stats, setStats] = useState({ total: 0, pending: 0, completedToday: 0, activeSites: 0 })
   const [loading, setLoading] = useState(true)
 
@@ -16,32 +19,69 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
+  // Realtime subscription for physician changes
+  useEffect(() => {
+    const channel = supabase
+      .channel('dashboard-physicians')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'physicians',
+        },
+        () => {
+          fetchData()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   async function fetchData() {
-    const [physRes, sitesRes] = await Promise.all([
-      supabase
-        .from('physicians')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10),
-      supabase
-        .from('recruiter_sites')
-        .select('id')
-        .eq('active', true),
-    ])
+    try {
+      const [physRes, sitesRes, countRes] = await Promise.all([
+        supabase
+          .from('physicians')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(10),
+        supabase
+          .from('recruiter_sites')
+          .select('id')
+          .eq('active', true),
+        supabase
+          .from('physicians')
+          .select('id', { count: 'exact', head: true }),
+      ])
 
-    const phys = (physRes.data || []) as Physician[]
-    setPhysicians(phys)
+      const phys = (physRes.data || []) as Physician[]
+      setPhysicians(phys)
+      setTotalCount(countRes.count || phys.length)
 
-    const today = new Date().toISOString().split('T')[0]
+      const today = new Date().toISOString().split('T')[0]
 
-    setStats({
-      total: phys.length,
-      pending: phys.filter((p) => p.status === 'pending' || p.status === 'processing').length,
-      completedToday: phys.filter((p) => p.status === 'complete' && p.created_at.startsWith(today)).length,
-      activeSites: sitesRes.data?.length || 0,
-    })
+      setStats({
+        total: countRes.count || phys.length,
+        pending: phys.filter((p) => p.status === 'pending' || p.status === 'processing').length,
+        completedToday: phys.filter((p) => p.status === 'complete' && p.created_at.startsWith(today)).length,
+        activeSites: sitesRes.data?.length || 0,
+      })
+    } catch {
+      addToast('Failed to load dashboard data', 'error')
+    }
 
     setLoading(false)
+  }
+
+  const statTooltips: Record<string, string> = {
+    'Total Physicians': 'Total number of physician profiles you have submitted',
+    'Pending': 'Physicians currently queued or being processed for matches',
+    'Completed Today': 'Physician profiles that finished matching today',
+    'Active Sites': 'Job sites currently being searched for matches',
   }
 
   const statCards = [
@@ -73,7 +113,11 @@ export default function Dashboard() {
         {loading
           ? Array.from({ length: 4 }).map((_, i) => <StatSkeleton key={i} />)
           : statCards.map((stat) => (
-              <div key={stat.label} className="rounded-xl border border-border bg-bg-card p-5 transition-all duration-200 hover:bg-bg-card-hover">
+              <div
+                key={stat.label}
+                className="rounded-xl border border-border bg-bg-card p-5 transition-all duration-200 hover:bg-bg-card-hover"
+                title={statTooltips[stat.label]}
+              >
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs text-text-muted uppercase tracking-wider">{stat.label}</span>
                   <stat.icon className={`w-4 h-4 ${stat.color}`} />
@@ -85,8 +129,16 @@ export default function Dashboard() {
 
       {/* Recent Submissions */}
       <div className="rounded-xl border border-border bg-bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold text-text-primary">Recent Submissions</h2>
+          {totalCount > 10 && (
+            <Link
+              to="/"
+              className="text-xs font-medium text-gold hover:text-gold-light transition-colors"
+            >
+              View All ({totalCount})
+            </Link>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -105,8 +157,18 @@ export default function Dashboard() {
                 : physicians.length === 0
                   ? (
                     <tr>
-                      <td colSpan={5} className="px-5 py-12 text-center text-text-muted">
-                        No physicians submitted yet. Click "New Physician" to get started.
+                      <td colSpan={5} className="px-5 py-16 text-center">
+                        <UserPlus className="w-10 h-10 text-text-muted mx-auto mb-3" />
+                        <p className="text-text-secondary font-medium">No physicians submitted yet</p>
+                        <p className="text-text-muted text-sm mt-1 mb-4">Get started by creating your first physician profile</p>
+                        <Link
+                          to="/new"
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200"
+                          style={{ background: 'linear-gradient(135deg, #C9A84C, #E8C97A)', color: '#070B14' }}
+                        >
+                          <Plus className="w-4 h-4" />
+                          New Physician
+                        </Link>
                       </td>
                     </tr>
                   )
@@ -126,6 +188,7 @@ export default function Dashboard() {
                         <button
                           onClick={() => navigate(`/physician/${physician.id}`)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gold hover:bg-gold/10 transition-colors"
+                          aria-label={`View matches for ${physician.full_name}`}
                         >
                           View <ArrowRight className="w-3 h-3" />
                         </button>

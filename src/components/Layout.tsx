@@ -3,20 +3,31 @@ import { LayoutDashboard, UserPlus, Globe, Shield, LogOut, Menu, X } from 'lucid
 import { useState } from 'react'
 import clsx from 'clsx'
 import { useAuth } from '../App.tsx'
+import ConfirmDialog from './ConfirmDialog.tsx'
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/new', icon: UserPlus, label: 'New Physician' },
-  { to: '/sites', icon: Globe, label: 'My Sites' },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', shortLabel: 'Home' },
+  { to: '/new', icon: UserPlus, label: 'New Physician', shortLabel: 'New' },
+  { to: '/sites', icon: Globe, label: 'My Sites', shortLabel: 'Sites' },
 ]
 
-const adminItem = { to: '/admin', icon: Shield, label: 'Admin Panel' }
+const adminItem = { to: '/admin', icon: Shield, label: 'Admin Panel', shortLabel: 'Admin' }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { profile, signOut } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false)
 
   const allNavItems = profile?.role === 'admin' ? [...navItems, adminItem] : navItems
+
+  function handleSignOut() {
+    setShowSignOutConfirm(true)
+  }
+
+  function confirmSignOut() {
+    setShowSignOutConfirm(false)
+    signOut()
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -26,6 +37,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
             className="md:hidden text-text-secondary hover:text-text-primary transition-colors"
+            aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -75,8 +87,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="p-3 border-t border-border">
             <button
-              onClick={signOut}
+              onClick={handleSignOut}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-bg-card-hover hover:text-red w-full transition-all duration-200"
+              aria-label="Sign out"
             >
               <LogOut className="w-4 h-4 ml-[14px]" />
               Sign Out
@@ -114,8 +127,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </nav>
               <div className="p-3 border-t border-border">
                 <button
-                  onClick={signOut}
+                  onClick={handleSignOut}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-bg-card-hover hover:text-red w-full transition-all duration-200"
+                  aria-label="Sign out"
                 >
                   <LogOut className="w-4 h-4" />
                   Sign Out
@@ -132,7 +146,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-bg-secondary/95 backdrop-blur-sm border-t border-border flex items-center justify-around z-20">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-bg-secondary/95 backdrop-blur-sm border-t border-border flex items-center z-20">
         {allNavItems.slice(0, 4).map((item) => (
           <NavLink
             key={item.to}
@@ -140,16 +154,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             end={item.to === '/'}
             className={({ isActive }) =>
               clsx(
-                'flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] transition-colors',
+                'flex-1 flex flex-col items-center gap-1 py-1.5 rounded-lg text-[10px] transition-colors',
                 isActive ? 'text-gold' : 'text-text-muted'
               )
             }
           >
             <item.icon className="w-5 h-5" />
-            {item.label}
+            {item.shortLabel}
           </NavLink>
         ))}
       </nav>
+
+      <ConfirmDialog
+        open={showSignOutConfirm}
+        title="Sign Out"
+        message="Are you sure you want to sign out?"
+        confirmLabel="Sign Out"
+        onConfirm={confirmSignOut}
+        onCancel={() => setShowSignOutConfirm(false)}
+      />
     </div>
   )
 }

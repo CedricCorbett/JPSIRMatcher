@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Users, Globe, Activity, Plus, Trash2, ExternalLink } from 'lucide-react'
+import { Users, Globe, Activity, BarChart3, Plus, Trash2, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase.ts'
 import { useAuth } from '../App.tsx'
 import { useToast } from '../components/Toast.tsx'
+import ConfirmDialog from '../components/ConfirmDialog.tsx'
 import type { Profile, RecruiterSite } from '../lib/types.ts'
 import { StatSkeleton } from '../components/LoadingSkeleton.tsx'
 
@@ -16,27 +17,32 @@ export default function AdminPanel() {
   const [showSiteForm, setShowSiteForm] = useState(false)
   const [siteForm, setSiteForm] = useState({ site_name: '', base_url: '', notes: '' })
   const [submitting, setSubmitting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => {
     fetchAll()
   }, [])
 
   async function fetchAll() {
-    const [recruitersRes, physRes, matchesRes, sitesRes] = await Promise.all([
-      supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-      supabase.from('physicians').select('id', { count: 'exact', head: true }),
-      supabase.from('matches').select('id', { count: 'exact', head: true }),
-      supabase.from('recruiter_sites').select('*').eq('is_global', true).order('created_at', { ascending: false }),
-    ])
+    try {
+      const [recruitersRes, physRes, matchesRes, sitesRes] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('physicians').select('id', { count: 'exact', head: true }),
+        supabase.from('matches').select('id', { count: 'exact', head: true }),
+        supabase.from('recruiter_sites').select('*').eq('is_global', true).order('created_at', { ascending: false }),
+      ])
 
-    setRecruiters((recruitersRes.data || []) as Profile[])
-    setGlobalSites((sitesRes.data || []) as RecruiterSite[])
-    setStats({
-      totalRecruiters: recruitersRes.data?.length || 0,
-      totalPhysicians: physRes.count || 0,
-      totalMatches: matchesRes.count || 0,
-      totalSites: sitesRes.data?.length || 0,
-    })
+      setRecruiters((recruitersRes.data || []) as Profile[])
+      setGlobalSites((sitesRes.data || []) as RecruiterSite[])
+      setStats({
+        totalRecruiters: recruitersRes.data?.length || 0,
+        totalPhysicians: physRes.count || 0,
+        totalMatches: matchesRes.count || 0,
+        totalSites: sitesRes.data?.length || 0,
+      })
+    } catch {
+      addToast('Failed to load admin data', 'error')
+    }
     setLoading(false)
   }
 
@@ -67,11 +73,13 @@ export default function AdminPanel() {
     setSubmitting(false)
   }
 
-  async function deleteGlobalSite(id: string) {
+  async function confirmDeleteGlobalSite() {
+    if (!deleteTarget) return
+
     const { error } = await supabase
       .from('recruiter_sites')
       .delete()
-      .eq('id', id)
+      .eq('id', deleteTarget)
 
     if (error) {
       addToast(error.message, 'error')
@@ -79,6 +87,8 @@ export default function AdminPanel() {
       addToast('Global site removed', 'info')
       fetchAll()
     }
+
+    setDeleteTarget(null)
   }
 
   const inputClass =
@@ -87,7 +97,7 @@ export default function AdminPanel() {
   const statCards = [
     { label: 'Total Recruiters', value: stats.totalRecruiters, icon: Users, color: 'text-gold' },
     { label: 'Total Physicians', value: stats.totalPhysicians, icon: Activity, color: 'text-blue' },
-    { label: 'Total Matches', value: stats.totalMatches, icon: Activity, color: 'text-green' },
+    { label: 'Total Matches', value: stats.totalMatches, icon: BarChart3, color: 'text-green' },
     { label: 'Global Sites', value: stats.totalSites, icon: Globe, color: 'text-amber' },
   ]
 
@@ -235,8 +245,9 @@ export default function AdminPanel() {
                   </td>
                   <td className="px-5 py-3">
                     <button
-                      onClick={() => deleteGlobalSite(site.id)}
+                      onClick={() => setDeleteTarget(site.id)}
                       className="p-1.5 rounded-lg text-text-muted hover:text-red hover:bg-red/10 transition-colors"
+                      aria-label={`Delete ${site.site_name}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -247,6 +258,16 @@ export default function AdminPanel() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete Global Site"
+        message="Are you sure you want to remove this global site? All recruiters will lose access to it."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDeleteGlobalSite}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
