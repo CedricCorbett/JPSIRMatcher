@@ -92,48 +92,29 @@ function hasRelevantListings(md: string, specialty: string): boolean {
 async function scrapeSite(site: any, specialty: string, fcKey: string, anthropicKey: string, log: (msg: string) => void): Promise<string> {
   const baseUrl = site.base_url.replace(/\/$/, '')
   const specShort = specialty.split(/[&\/]/)[0].trim()
-
-  // Parse origin (protocol+host) so we can build URLs from both root and base path
   const urlObj = new URL(baseUrl)
-  const origin = urlObj.origin // e.g. https://ehccareers-emory.icims.com
+  const origin = urlObj.origin
+  const hasSubpath = urlObj.pathname !== '/' && urlObj.pathname !== ''
+  const spec = encodeURIComponent(specShort)
 
-  const searchTerms = [
-    encodeURIComponent(specialty),
-    encodeURIComponent(specialty.replace(/&/g, 'and')),
-    encodeURIComponent(specShort),
-  ]
-
-  // Build search URL candidates from both the base URL and the origin root.
-  // Also include base URL with query params appended (for when base_url IS the search page).
+  // Build a focused list of search URLs (max ~6, ordered by likelihood)
   const seen = new Set<string>()
   const searchUrls: string[] = []
-  function addUrl(url: string) {
-    if (!seen.has(url)) { seen.add(url); searchUrls.push(url) }
+  function addUrl(url: string) { if (!seen.has(url)) { seen.add(url); searchUrls.push(url) } }
+
+  // 1. Query params on base URL (for ICIMS, Workday where base IS the search page)
+  addUrl(`${baseUrl}?ss=1&searchKeyword=${spec}&searchRelation=keyword_all`)
+  addUrl(`${baseUrl}?keywords=${spec}`)
+  // 2. Phenom / standard search paths off the base URL
+  addUrl(`${baseUrl}/search-results?keywords=${spec}`)
+  addUrl(`${baseUrl}/search?q=${spec}`)
+  // 3. If base URL has a subpath, also try from origin root
+  if (hasSubpath) {
+    addUrl(`${origin}/jobs/search?ss=1&searchKeyword=${spec}&searchRelation=keyword_all`)
+    addUrl(`${origin}/search-results?keywords=${spec}`)
   }
 
-  // Direct query-param variants on the base URL itself (handles ICIMS, Workday, etc. where base IS the search page)
-  addUrl(`${baseUrl}?ss=1&searchKeyword=${searchTerms[2]}&searchRelation=keyword_all`)
-  addUrl(`${baseUrl}?q=${searchTerms[0]}`)
-  addUrl(`${baseUrl}?keywords=${searchTerms[0]}`)
-  addUrl(`${baseUrl}?search=${searchTerms[0]}`)
-
-  // Phenom / standard path-based patterns off the base URL
-  addUrl(`${baseUrl}/search-results?keywords=${searchTerms[0]}`)
-  addUrl(`${baseUrl}/search-results?keywords=${searchTerms[2]}`)
-  addUrl(`${baseUrl}/search?q=${searchTerms[0]}`)
-
-  // If base URL has a subpath, also try patterns from the origin root
-  if (urlObj.pathname !== '/' && urlObj.pathname !== '') {
-    addUrl(`${origin}/search-results?keywords=${searchTerms[0]}`)
-    addUrl(`${origin}/search?q=${searchTerms[0]}`)
-    addUrl(`${origin}/jobs/search?ss=1&searchKeyword=${searchTerms[2]}&searchRelation=keyword_all`)
-    addUrl(`${origin}/jobs?search=${searchTerms[0]}`)
-    addUrl(`${origin}/careers?q=${searchTerms[0]}`)
-  }
-
-  // Phase 1: Try direct search URL patterns (standard scrape)
-  let bestCandidate = { url: '', length: 0 }
-
+  // Phase 1: Try each URL. If thin content (JS-rendered), immediately retry with waitFor.
   for (const url of searchUrls) {
     try {
       log(`  Trying: ${url}`)
@@ -144,43 +125,36 @@ async function scrapeSite(site: any, specialty: string, fcKey: string, anthropic
         return md.substring(0, 15000)
       }
 
-      if (md.length > bestCandidate.length) {
-        bestCandidate = { url, length: md.length }
-      }
-
-      if (md.length > 0) {
-        log(`  Got ${md.length} chars but no relevant listings`)
+      // Thin content suggests JS-rendered page — retry with waitFor immediately
+      if (md.length > 50 && md.length < 500) {
+        log(`  Thin result (${md.length} chars), retrying with waitFor...`)
+        const mdWait = await firecrawlScrape(url, fcKey, 5000)
+        if (hasRelevantListings(mdWait, specialty)) {
+          log(`  Found listings via waitFor: ${mdWait.length} chars`)
+          return mdWait.substring(0, 15000)
+        }
       }
     } catch (err: any) {
       log(`  Error: ${err.message}`)
     }
   }
 
-  // Phase 2: Retry best candidates with waitFor (handles JS-rendered SPAs like Phenom, ICIMS)
-  // Try both the best Phase 1 candidate and the base URL with waitFor
-  const waitForUrls = new Set<string>()
-  if (bestCandidate.url && bestCandidate.length > 0) waitForUrls.add(bestCandidate.url)
-  waitForUrls.add(baseUrl)
-  // Also try the most likely search URL with waitFor
-  waitForUrls.add(`${baseUrl}/search-results?keywords=${searchTerms[0]}`)
-
-  for (const url of waitForUrls) {
-    log(`  Phase 2: Trying ${url} with waitFor 5000ms...`)
-    try {
-      const md = await firecrawlScrape(url, fcKey, 5000)
-      if (hasRelevantListings(md, specialty)) {
-        log(`  Found listings via waitFor: ${md.length} chars`)
-        return md.substring(0, 15000)
-      }
-      if (md.length > 0) {
-        log(`  waitFor got ${md.length} chars but no relevant listings`)
-      }
-    } catch (err: any) {
-      log(`  waitFor error: ${err.message}`)
+  // Phase 2: Try base URL with waitFor as last resort for SPAs
+  log(`  Phase 2: Trying base URL with waitFor 5000ms...`)
+  try {
+    const md = await firecrawlScrape(baseUrl, fcKey, 5000)
+    if (hasRelevantListings(md, specialty)) {
+      log(`  Found listings via waitFor: ${md.length} chars`)
+      return md.substring(0, 15000)
     }
+    if (md.length > 0) {
+      log(`  waitFor got ${md.length} chars but no relevant listings`)
+    }
+  } catch (err: any) {
+    log(`  waitFor error: ${err.message}`)
   }
 
-  // Phase 3: Scrape base URL and ask Claude to find the real job search URL
+  // Phase 3: Ask Claude to discover the real job search URL from landing page
   log(`  Phase 3: Discovering job search URL from landing page...`)
   try {
     const landingMd = await firecrawlScrape(baseUrl, fcKey)
