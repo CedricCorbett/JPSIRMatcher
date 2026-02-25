@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, Globe, Plus, ArrowRight, UserPlus } from 'lucide-react'
+import { Users, Clock, CheckCircle, Globe, Plus, ArrowRight, UserPlus, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase.ts'
 import type { Physician } from '../lib/types.ts'
 import StatusBadge from '../components/StatusBadge.tsx'
 import { StatSkeleton, TableRowSkeleton } from '../components/LoadingSkeleton.tsx'
 import { useToast } from '../components/Toast.tsx'
+import ConfirmDialog from '../components/ConfirmDialog.tsx'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -14,6 +15,7 @@ export default function Dashboard() {
   const [totalCount, setTotalCount] = useState(0)
   const [stats, setStats] = useState({ total: 0, pending: 0, completedToday: 0, activeSites: 0 })
   const [loading, setLoading] = useState(true)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -75,6 +77,18 @@ export default function Dashboard() {
     }
 
     setLoading(false)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    const { error } = await supabase.from('physicians').delete().eq('id', deleteTarget)
+    if (error) {
+      addToast(error.message, 'error')
+    } else {
+      addToast('Physician deleted', 'info')
+      fetchData()
+    }
+    setDeleteTarget(null)
   }
 
   const statTooltips: Record<string, string> = {
@@ -185,13 +199,22 @@ export default function Dashboard() {
                         {new Date(physician.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-5 py-3">
-                        <button
-                          onClick={() => navigate(`/physician/${physician.id}`)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gold hover:bg-gold/10 transition-colors"
-                          aria-label={`View matches for ${physician.full_name}`}
-                        >
-                          View <ArrowRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => navigate(`/physician/${physician.id}`)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gold hover:bg-gold/10 transition-colors"
+                            aria-label={`View matches for ${physician.full_name}`}
+                          >
+                            View <ArrowRight className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDeleteTarget(physician.id) }}
+                            className="p-1.5 rounded-lg text-text-muted hover:text-red hover:bg-red/10 transition-colors"
+                            aria-label={`Delete ${physician.full_name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -199,6 +222,15 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete Physician"
+        message="This will permanently delete this physician and all associated job listings and matches. This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { useAuth } from '../App.tsx'
 import { useToast } from '../components/Toast.tsx'
 import ConfirmDialog from '../components/ConfirmDialog.tsx'
 import type { Profile, RecruiterSite } from '../lib/types.ts'
+import { REGION_GROUPS } from '../lib/types.ts'
 import { StatSkeleton } from '../components/LoadingSkeleton.tsx'
 
 export default function AdminPanel() {
@@ -15,7 +16,7 @@ export default function AdminPanel() {
   const [globalSites, setGlobalSites] = useState<RecruiterSite[]>([])
   const [stats, setStats] = useState({ totalRecruiters: 0, totalPhysicians: 0, totalMatches: 0, totalSites: 0 })
   const [showSiteForm, setShowSiteForm] = useState(false)
-  const [siteForm, setSiteForm] = useState({ site_name: '', base_url: '', notes: '' })
+  const [siteForm, setSiteForm] = useState({ site_name: '', base_url: '', notes: '', operating_regions: [] as string[] })
   const [submitting, setSubmitting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
@@ -59,13 +60,14 @@ export default function AdminPanel() {
       notes: siteForm.notes || null,
       active: true,
       is_global: true,
+      operating_regions: siteForm.operating_regions.length > 0 ? siteForm.operating_regions : null,
     })
 
     if (error) {
       addToast(error.message, 'error')
     } else {
       addToast('Global site added', 'success')
-      setSiteForm({ site_name: '', base_url: '', notes: '' })
+      setSiteForm({ site_name: '', base_url: '', notes: '', operating_regions: [] })
       setShowSiteForm(false)
       fetchAll()
     }
@@ -193,6 +195,37 @@ export default function AdminPanel() {
                 placeholder="https://..."
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">
+                Operating Regions <span className="normal-case text-text-muted">(leave empty for national)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.keys(REGION_GROUPS).map((region) => {
+                  const active = siteForm.operating_regions.includes(region)
+                  return (
+                    <button
+                      key={region}
+                      type="button"
+                      onClick={() => {
+                        setSiteForm((prev) => ({
+                          ...prev,
+                          operating_regions: active
+                            ? prev.operating_regions.filter((r) => r !== region)
+                            : [...prev.operating_regions, region],
+                        }))
+                      }}
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        active
+                          ? 'bg-gold/20 text-gold border border-gold/30'
+                          : 'bg-bg-primary text-text-secondary border border-border hover:border-gold/30 hover:text-gold'
+                      }`}
+                    >
+                      {region}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div className="flex gap-3">
               <button
                 type="submit"
@@ -219,13 +252,14 @@ export default function AdminPanel() {
               <tr className="text-left text-xs text-text-muted uppercase tracking-wider border-b border-border">
                 <th className="px-5 py-3 font-medium">Name</th>
                 <th className="px-5 py-3 font-medium">URL</th>
+                <th className="px-5 py-3 font-medium">Regions</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {globalSites.length === 0 ? (
-                <tr><td colSpan={4} className="px-5 py-8 text-center text-text-muted">No global sites.</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-text-muted">No global sites.</td></tr>
               ) : globalSites.map((site) => (
                 <tr key={site.id} className="hover:bg-bg-card-hover transition-colors">
                   <td className="px-5 py-3 font-medium text-text-primary">{site.site_name}</td>
@@ -239,6 +273,17 @@ export default function AdminPanel() {
                       {site.base_url}
                       <ExternalLink className="w-3 h-3 shrink-0" />
                     </a>
+                  </td>
+                  <td className="px-5 py-3">
+                    {site.operating_regions && site.operating_regions.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {site.operating_regions.map((r) => (
+                          <span key={r} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gold/10 text-gold">{r}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-text-muted">National</span>
+                    )}
                   </td>
                   <td className="px-5 py-3">
                     <span className="px-3 py-1 rounded-full text-xs font-medium bg-green/10 text-green">Active</span>

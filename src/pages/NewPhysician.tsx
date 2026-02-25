@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase.ts'
 import { useAuth } from '../App.tsx'
 import { useToast } from '../components/Toast.tsx'
-import { SPECIALTIES, US_STATES } from '../lib/types.ts'
+import { SPECIALTIES, US_STATES, REGION_GROUPS } from '../lib/types.ts'
 
 const AUTOSAVE_KEY = 'physmatch_new_physician_draft'
 
@@ -214,13 +214,24 @@ export default function NewPhysician() {
     // Clear autosave on successful submit
     localStorage.removeItem(AUTOSAVE_KEY)
 
-    // Fire the edge function (don't await)
-    supabase.functions.invoke('process-physician', {
-      body: { physician_id: data.id, recruiter_id: session.user.id },
-    })
-
     addToast('Physician submitted — matching in progress', 'success')
     navigate(`/physician/${data.id}`)
+
+    // Fire the edge function AFTER navigation so page change doesn't abort the request
+    // Use fetch directly to avoid Supabase client abort-on-unmount behavior
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    fetch(`${supabaseUrl}/functions/v1/process-physician`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ physician_id: data.id, recruiter_id: session.user.id }),
+      keepalive: true,
+    }).catch((err) => {
+      console.error('Edge function call error:', err)
+    })
   }
 
   const inputClass =
@@ -382,6 +393,32 @@ export default function NewPhysician() {
                 <label className="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">
                   Preferred States
                 </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {Object.entries(REGION_GROUPS).map(([region, states]) => {
+                    const allSelected = states.every((s) => form.preferred_states.includes(s))
+                    return (
+                      <button
+                        key={region}
+                        type="button"
+                        onClick={() => {
+                          if (allSelected) {
+                            update('preferred_states', form.preferred_states.filter((s) => !states.includes(s)))
+                          } else {
+                            const merged = new Set([...form.preferred_states, ...states])
+                            update('preferred_states', [...merged])
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                          allSelected
+                            ? 'bg-gold/20 text-gold border border-gold/30'
+                            : 'bg-bg-primary text-text-secondary border border-border hover:border-gold/30 hover:text-gold'
+                        }`}
+                      >
+                        {region}
+                      </button>
+                    )
+                  })}
+                </div>
                 <StateMultiSelect
                   selected={form.preferred_states}
                   onChange={(states) => update('preferred_states', states)}

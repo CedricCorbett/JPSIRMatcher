@@ -14,6 +14,7 @@ export interface RecruiterSite {
   notes: string | null
   active: boolean
   is_global: boolean
+  operating_regions: string[] | null
   created_at: string
 }
 
@@ -122,3 +123,12 @@ export const US_STATES = [
   'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
 ] as const
+
+export const REGION_GROUPS: Record<string, readonly string[]> = {
+  'Northeast': ['CT','DE','MA','MD','ME','NH','NJ','NY','PA','RI','VT'],
+  'Southeast': ['AL','AR','FL','GA','KY','LA','MS','NC','SC','TN','VA','WV'],
+  'Midwest': ['IA','IL','IN','KS','MI','MN','MO','ND','NE','OH','SD','WI'],
+  'Southwest': ['AZ','NM','OK','TX'],
+  'Mountain West': ['CO','ID','MT','NV','UT','WY'],
+  'Pacific': ['AK','CA','HI','OR','WA'],
+} as const

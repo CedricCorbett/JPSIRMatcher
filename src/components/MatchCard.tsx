@@ -59,12 +59,17 @@ export default function MatchCard({ match, selected, onClick }: MatchCardProps) 
       </div>
 
       <div className="flex flex-wrap gap-1.5 mt-3">
-        {match.strengths?.slice(0, 2).map((s, i) => (
+        {match.match_score < 0 && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-text-muted/10 text-text-muted">
+            Unscored — Review Manually
+          </span>
+        )}
+        {match.match_score >= 0 && match.strengths?.slice(0, 2).map((s, i) => (
           <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-green/10 text-green truncate max-w-[140px]" title={s}>
             {s}
           </span>
         ))}
-        {match.gaps?.slice(0, 1).map((g, i) => (
+        {match.match_score >= 0 && match.gaps?.slice(0, 1).map((g, i) => (
           <span key={i} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber/10 text-amber truncate max-w-[140px]" title={g}>
             {g}
           </span>

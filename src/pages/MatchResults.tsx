@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Copy, ExternalLink, CheckCircle, AlertTriangle,
-  Loader2, Search, ChevronRight
+  Loader2, Search, ChevronRight, Trash2, RotateCcw
 } from 'lucide-react'
 import { supabase } from '../lib/supabase.ts'
 import type { Physician, Match } from '../lib/types.ts'
@@ -11,12 +11,15 @@ import MatchCard from '../components/MatchCard.tsx'
 import ScoreGauge from '../components/ScoreGauge.tsx'
 import { CardSkeleton } from '../components/LoadingSkeleton.tsx'
 import { useToast } from '../components/Toast.tsx'
+import ConfirmDialog from '../components/ConfirmDialog.tsx'
+import { useAuth } from '../App.tsx'
 
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 export default function MatchResults() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { session } = useAuth()
   const { addToast } = useToast()
 
   const [physician, setPhysician] = useState<Physician | null>(null)
@@ -24,6 +27,9 @@ export default function MatchResults() {
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
   const [loading, setLoading] = useState(true)
   const [timedOut, setTimedOut] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
 
   const processingStartRef = useRef<number | null>(null)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -138,6 +144,55 @@ export default function MatchResults() {
     addToast('Email summary copied to clipboard', 'success')
   }
 
+  async function confirmDelete() {
+    if (!id) return
+    const { error } = await supabase.from('physicians').delete().eq('id', id)
+    if (error) {
+      addToast(error.message, 'error')
+    } else {
+      addToast('Physician deleted', 'info')
+      navigate('/')
+    }
+    setShowDeleteConfirm(false)
+  }
+
+  async function confirmReprocess() {
+    if (!id || !session?.user?.id) return
+    setReprocessing(true)
+    setShowReprocessConfirm(false)
+
+    // Delete existing matches and job_listings for this physician
+    await supabase.from('matches').delete().eq('physician_id', id)
+    await supabase.from('job_listings').delete().eq('physician_id', id)
+
+    // Reset status to pending
+    await supabase.from('physicians').update({ status: 'pending', error_message: null }).eq('id', id)
+
+    setMatches([])
+    setSelectedMatch(null)
+    setTimedOut(false)
+    processingStartRef.current = null
+    addToast('Reprocessing started', 'success')
+
+    // Re-call edge function
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    fetch(`${supabaseUrl}/functions/v1/process-physician`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ physician_id: id, recruiter_id: session.user.id }),
+      keepalive: true,
+    }).catch((err) => {
+      console.error('Reprocess edge function error:', err)
+    })
+
+    setReprocessing(false)
+    fetchData()
+  }
+
   if (loading) {
     return (
       <div className="space-y-6 pb-20 md:pb-0">
@@ -168,16 +223,37 @@ export default function MatchResults() {
 
   return (
     <div className="space-y-6 pb-20 md:pb-0">
-      {/* Breadcrumbs */}
-      <nav className="flex items-center gap-1.5 text-sm">
-        <Link to="/" className="text-text-secondary hover:text-text-primary transition-colors">
-          Dashboard
-        </Link>
-        <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
-        <span className="text-text-primary font-medium">
-          {physician.full_name}
-        </span>
-      </nav>
+      {/* Breadcrumbs + Actions */}
+      <div className="flex items-center justify-between">
+        <nav className="flex items-center gap-1.5 text-sm">
+          <Link to="/" className="text-text-secondary hover:text-text-primary transition-colors">
+            Dashboard
+          </Link>
+          <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
+          <span className="text-text-primary font-medium">
+            {physician.full_name}
+          </span>
+        </nav>
+        <div className="flex items-center gap-2">
+          {(physician.status === 'complete' || physician.status === 'error') && (
+            <button
+              onClick={() => setShowReprocessConfirm(true)}
+              disabled={reprocessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue border border-blue/30 hover:bg-blue/10 transition-colors disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reprocess
+            </button>
+          )}
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red border border-red/30 hover:bg-red/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </button>
+        </div>
+      </div>
 
       {/* Physician Card */}
       <PhysicianCard physician={physician} />
@@ -217,6 +293,25 @@ export default function MatchResults() {
           </p>
         </div>
       )}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Physician"
+        message="This will permanently delete this physician and all associated job listings and matches. This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={showReprocessConfirm}
+        title="Reprocess Physician"
+        message="This will delete all existing matches and re-run the search from scratch. Continue?"
+        confirmLabel="Reprocess"
+        onConfirm={confirmReprocess}
+        onCancel={() => setShowReprocessConfirm(false)}
+      />
     </div>
   )
 }
