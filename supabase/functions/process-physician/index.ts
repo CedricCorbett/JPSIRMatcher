@@ -164,16 +164,16 @@ ${JSON.stringify(jobsSummary, null, 2)}
 
 TASK:
 Analyze each job listing and determine how well it matches this physician.
-Return a JSON array with one object per job listing.
+You MUST return EXACTLY one object for EVERY job listing provided — do NOT skip, omit, or filter out any listing regardless of match quality. Even a 0% match must be included with a score and ranking. The total number of objects in your response MUST equal the total number of job listings above (${jobsSummary.length} listings).
 
 Each object must have these exact fields:
-- job_listing_id: (string, the id field from the listing)
+- job_listing_id: (string, the id field from the listing — must match exactly)
 - match_score: (integer 0-100, where 100 is perfect match)
 - match_reasoning: (string, 2-3 sentences explaining the score)
 - strengths: (array of exactly 3 strings, specific reasons this is a good match)
 - gaps: (array of strings, concerns or missing information — can be empty array)
 - email_summary: (string, one professional paragraph the recruiter could use to introduce this physician to the hiring organization — do not use placeholder names)
-- rank: (integer, 1 = best match overall)
+- rank: (integer, 1 = best match overall, every listing gets a unique rank from 1 to ${jobsSummary.length})
 
 Sort by rank ascending (rank 1 first).
 Return ONLY the raw JSON array. No markdown fences, no explanation, no wrapper.`
@@ -187,7 +187,7 @@ Return ONLY the raw JSON array. No markdown fences, no explanation, no wrapper.`
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
+        max_tokens: 16000,
         messages: [{ role: 'user', content: claudePrompt }],
       }),
     })
@@ -202,6 +202,26 @@ Return ONLY the raw JSON array. No markdown fences, no explanation, no wrapper.`
       if (!Array.isArray(matches)) matches = []
     } catch {
       matches = []
+    }
+
+    // Ensure every job listing has a match — backfill any Claude missed
+    const matchedJobIds = new Set(matches.map((m: any) => m.job_listing_id))
+    const missingJobs = insertedJobs.filter((j: any) => !matchedJobIds.has(j.id))
+
+    if (missingJobs.length > 0) {
+      console.warn(`Claude missed ${missingJobs.length} of ${insertedJobs.length} listings — backfilling`)
+      const maxRank = matches.length > 0 ? Math.max(...matches.map((m: any) => m.rank || 0)) : 0
+      missingJobs.forEach((j: any, idx: number) => {
+        matches.push({
+          job_listing_id: j.id,
+          match_score: 0,
+          match_reasoning: 'This listing was found but could not be evaluated by the AI matching system. Review manually.',
+          strengths: ['Specialty-relevant listing found', 'Position is currently active', 'Within registered site network'],
+          gaps: ['Requires manual review'],
+          email_summary: `A ${j.specialty || 'physician'} position at ${j.organization || 'this organization'} in ${j.location || 'an unspecified location'} was identified and may warrant further review.`,
+          rank: maxRank + idx + 1,
+        })
+      })
     }
 
     // Insert matches
