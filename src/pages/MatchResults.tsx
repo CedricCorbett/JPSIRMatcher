@@ -157,40 +157,67 @@ export default function MatchResults() {
   }
 
   async function confirmReprocess() {
-    if (!id || !session?.user?.id) return
+    if (!id || !session?.user?.id || !physician) return
     setReprocessing(true)
     setShowReprocessConfirm(false)
 
-    // Delete existing matches and job_listings for this physician
-    await supabase.from('matches').delete().eq('physician_id', id)
-    await supabase.from('job_listings').delete().eq('physician_id', id)
+    try {
+      // Delete existing matches and job_listings for this physician
+      await supabase.from('matches').delete().eq('physician_id', id)
+      await supabase.from('job_listings').delete().eq('physician_id', id)
 
-    // Reset status to pending
-    await supabase.from('physicians').update({ status: 'pending', error_message: null }).eq('id', id)
+      // Reset status to pending
+      const { error: updateError } = await supabase
+        .from('physicians')
+        .update({ status: 'pending', error_message: null })
+        .eq('id', id)
 
-    setMatches([])
-    setSelectedMatch(null)
-    setTimedOut(false)
-    processingStartRef.current = null
-    addToast('Reprocessing started', 'success')
+      if (updateError) {
+        addToast(`Failed to reset status: ${updateError.message}`, 'error')
+        setReprocessing(false)
+        return
+      }
 
-    // Re-call edge function
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-    fetch(`${supabaseUrl}/functions/v1/process-physician`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ physician_id: id, recruiter_id: session.user.id }),
-      keepalive: true,
-    }).catch((err) => {
-      console.error('Reprocess edge function error:', err)
-    })
+      // Update local state immediately so polling/UI reacts
+      setPhysician({ ...physician, status: 'pending', error_message: null })
+      setMatches([])
+      setSelectedMatch(null)
+      setTimedOut(false)
+      processingStartRef.current = null
+
+      // Re-call edge function and check response
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const resp = await fetch(`${supabaseUrl}/functions/v1/process-physician`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ physician_id: id, recruiter_id: session.user.id }),
+      })
+
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        console.error('Reprocess edge function error:', resp.status, body)
+        // Edge function's own catch should mark physician as error,
+        // but if the call itself failed, update locally
+        addToast(`Reprocess failed: ${body?.error || resp.statusText}`, 'error')
+        await supabase.from('physicians')
+          .update({ status: 'error', error_message: body?.error || 'Edge function failed' })
+          .eq('id', id)
+        setPhysician((prev) => prev ? { ...prev, status: 'error', error_message: body?.error || 'Edge function failed' } : prev)
+      } else {
+        // Edge function completed — fetch final results
+        addToast('Reprocessing complete', 'success')
+        fetchData()
+      }
+    } catch (err: any) {
+      console.error('Reprocess error:', err)
+      addToast(`Reprocess error: ${err.message}`, 'error')
+    }
 
     setReprocessing(false)
-    fetchData()
   }
 
   if (loading) {
@@ -235,14 +262,23 @@ export default function MatchResults() {
           </span>
         </nav>
         <div className="flex items-center gap-2">
-          {(physician.status === 'complete' || physician.status === 'error') && (
+          {(physician.status === 'complete' || physician.status === 'error' || reprocessing) && (
             <button
               onClick={() => setShowReprocessConfirm(true)}
               disabled={reprocessing}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue border border-blue/30 hover:bg-blue/10 transition-colors disabled:opacity-50"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reprocess
+              {reprocessing ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Reprocessing...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reprocess
+                </>
+              )}
             </button>
           )}
           <button
